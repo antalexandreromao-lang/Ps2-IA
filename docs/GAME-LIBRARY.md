@@ -15,6 +15,12 @@ These library features came from [RIPPS2](https://gitlab.com/akilluminati247/RIP
 | Hide a game | Game menu → **Hide Game** / **Show Game Again** | `hidden.txt` on the game's device |
 | Delete a game and its files | Game menu → **Delete** | nothing |
 
+## First boot: make the PS1/PS2 library appear
+
+The game list is built from a configured, started source; launching the ELF from an emulator's `host:` folder does not by itself make games in that folder a library source. In **Settings → Game Sources**, enable and start the storage or network source that actually contains your own game files. If no source is available yet, the Start menu can remain the only screen with useful actions, so returning from Settings will not reveal a populated library.
+
+For separate system lists, set **Settings → Interface → PS2/PS1 Game Display** to **Both (L3)**. On a device page, **L3** switches between its PS2 and PS1 lists; the built-in theme already draws separate PS2 and PS1 labels. Artwork is also user-supplied: put `ART/<game-ID>_COV.png` (cover) and, when wanted, `ART/<game-ID>_BG.png` (background) on the same supported source, then enable **Cover Art** and **Background Art** in **Settings → Interface → Artwork Settings**. Use the title's actual disc ID where available; see [VCD setup](VCD.md) for PS1 folder and filename rules. No game images, BIOS, POPS files, or POPSTARTER are included.
+
 ## All Games list
 
 Turn it on with **Settings → Interface → Library: All Games List** (right under Theme View, and it works

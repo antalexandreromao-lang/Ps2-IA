@@ -3,7 +3,7 @@
 
 #include "include/guiboot.h"
 
-// The boot splash: the glowing logo, the version and status lines, and the intro loop that fades it out.
+// The boot splash: the bundled full-frame reference image and the intro loop that fades it out.
 class BootSplash
 {
 public:

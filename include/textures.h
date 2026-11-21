@@ -154,6 +154,7 @@ enum INTERNAL_TEXTURE {
     OPL_LIBRARY_BACKGROUND,
     OPL_LIBRARY_OVERLAY,
     OPL_LIBRARY_OVERLAY_PS1,
+    BOOT_SPLASH_PICTURE, // fixed full-screen startup reference image
 
     TEXTURES_COUNT
 };

@@ -49,7 +49,7 @@ ELF HDL ISO VCD ZSO UL CUE EXE BIN APPS CD DVD Aspect_s Aspect_w Aspect_w1
 Aspect_w2 Rating_0
 Rating_1 Rating_2 Rating_3 Rating_4 Rating_5 Scan_240p Scan_240p1 Scan_480i Scan_480p
 Scan_480p1 Scan_480p2 Scan_480p3 Scan_480p4 Scan_480p5 Scan_576i Scan_576p Scan_720p
-Scan_1080i Scan_1080i2 Scan_1080p Vmode_multi Vmode_ntsc Vmode_pal logo
+Scan_1080i Scan_1080i2 Scan_1080p Vmode_multi Vmode_ntsc Vmode_pal logo boot_splash
 logo0 logo1 logo2 logo3 case
 Index_0 Index_1 Index_2 Index_3 Index_4 Index2_0 Index2_1 Index3_0 Index3_1 Index3_2
 Index4_0 Index4_1 Index4_2 Index4_3 fav fav_mark R3 L3 L1 R1 PS1 PS2 case_overlay psbbn_bg techwritescode

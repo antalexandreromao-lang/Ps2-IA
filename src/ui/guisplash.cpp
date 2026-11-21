@@ -13,6 +13,7 @@
 #include "include/renderman.h"
 #include "include/fntsys.h"
 #include "include/themes.h"
+#include "include/textures.h"
 #include "include/sound.h"
 #include "include/diaglog.h"
 
@@ -64,41 +65,24 @@ void BootSplash::drawLogo(GSTEXTURE *logo, int cx, int cy, int alpha)
 
 void BootSplash::render(int alpha)
 {
-    u64 mycolor = GS_SETREG_RGBA(0x80, 0x80, 0x80, alpha);
+    u64 mycolor = GS_SETREG_RGBA(0xFF, 0xFF, 0xFF, alpha);
     rmDrawRect(0, 0, gGuiScreenWidth, gGuiScreenHeight, mycolor);
 
-    // The logo holds still and glows. It used to flip through the embedded logo0..logoN frames (a vertical
-    // blur that read as a jump); those are a squash/stretch of one crisp image, so the first frame is the
-    // logo and the "animation" is now a halo that breathes around it (guiDrawBootLogo).
-    int logoTex = (gTheme->logoFrameCount >= 1) ? LOGO0_PICTURE : LOGO_PICTURE;
+    GSTEXTURE *splash = thmGetTexture(BOOT_SPLASH_PICTURE);
+    if (splash == NULL || splash->Width == 0 || splash->Height == 0)
+        return;
 
-    // Sit the logo above centre rather than dead centre: the version + status lines hang below it,
-    // so a centred logo pushes that block low and reads bottom-heavy. Clamped so a tall logo (or a
-    // short theme height) can never ride off the top of the screen.
-    int logoCenterY = (gTheme->usedHeight >> 1) - BOOT_LOGO_RISE;
-
-    GSTEXTURE *logo = thmGetTexture(logoTex);
-    if (logo) {
-        int drawY = logoCenterY;
-        if (drawY < (int)(logo->Height >> 1))
-            drawY = logo->Height >> 1;
-
-        drawLogo(logo, gGuiScreenWidth >> 1, drawY, alpha);
+    // A 16:9 display uses 3/4 width scaling in this 640x480 UI grid. Compensate the input
+    // width so the logo fills the wide display while keeping the reference image's proportions.
+    const int wide = rmIsWideDisplay();
+    int drawWidth = wide ? (gGuiScreenWidth * 4 + 1) / 3 : gGuiScreenWidth;
+    int drawHeight = (drawWidth * (int)splash->Height + (int)splash->Width / 2) / (int)splash->Width;
+    if (drawHeight > gGuiScreenHeight) {
+        drawHeight = gGuiScreenHeight;
+        drawWidth = (drawHeight * (int)splash->Width + (int)splash->Height / 2) / (int)splash->Height;
     }
-
-    // Boot info: OPL version, PS1/PS2 identity and a live status line, faded with the splash.
-    // Reuses gTheme->fonts[0] (always-loaded built-in) and the same OPL_VERSION About shows.
-    u64 infoColor = GS_SETREG_RGBA(0x05, 0x06, 0x0A, alpha);
-    u64 accentColor = GS_SETREG_RGBA(0x13, 0x3A, 0x70, alpha);
-    char verLine[48];
-    snprintf(verLine, sizeof(verLine), "OPL %s", OPL_VERSION);
-    fntRenderString(gTheme->fonts[0], gGuiScreenWidth >> 1, logoCenterY + 80, ALIGN_CENTER, 0, 0, verLine, infoColor);
-    fntRenderString(gTheme->fonts[0], gGuiScreenWidth >> 1, logoCenterY + 105, ALIGN_CENTER, 0, 0, "PS1 / PS2 GAME LOADER", accentColor);
-    // Prefer an IO-thread boot-step label (the localizer) over the main-thread scan/Ready line,
-    // so a wedged step names itself. gBootStickyLabel is a single atomic pointer to a static string.
-    const char *bootLine = status.line();
-    if (bootLine != NULL)
-        fntRenderString(gTheme->fonts[0], gGuiScreenWidth >> 1, gTheme->usedHeight - 40, ALIGN_CENTER, 0, 0, bootLine, accentColor);
+    rmDrawPixmap(splash, gGuiScreenWidth >> 1, gGuiScreenHeight >> 1, ALIGN_CENTER, drawWidth, drawHeight,
+                 wide ? SCALING_RATIO : SCALING_NONE, GS_SETREG_RGBA(0x80, 0x80, 0x80, alpha), 0);
 }
 
 // Draw one standalone boot-splash frame: the same greeting guiIntroLoop() shows,

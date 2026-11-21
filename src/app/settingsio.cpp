@@ -293,39 +293,56 @@ static int configPathRedirectLocation(char *out, int outLen)
     return 1;
 }
 
-static int readConfigPathRedirect(char *outPath, int outPathLen)
+static int readConfigPathCandidate(const char *filePath, char *outPath, int outPathLen)
 {
     int fd;
     int len;
+
+    if (outPathLen < 2)
+        return 0;
+    fd = open(filePath, O_RDONLY);
+    if (fd < 0)
+        return 0;
+
+    len = read(fd, outPath, outPathLen - 1);
+    close(fd);
+    if (len <= 0) {
+        outPath[0] = '\0';
+        return 0;
+    }
+
+    while (len > 0 && (outPath[len - 1] == '\r' || outPath[len - 1] == '\n' || outPath[len - 1] == ' ' || outPath[len - 1] == '\t'))
+        len--;
+    outPath[len] = '\0';
+    return len > 0;
+}
+
+static int readConfigPathRedirect(char *outPath, int outPathLen)
+{
     char redirectFile[sizeof(gBootDir) + 32];
+    char mcPath[64];
 
     // APA launchers can leave the process CWD in raw hdd0: space. Once the data partition
     // is mounted, anchor the bootstrap pointer to the resolved PFS config home instead of
     // sending an ordinary file open through the raw APA namespace.
     if (!configPathRedirectLocation(redirectFile, sizeof(redirectFile)))
         return 0;
-    fd = open(redirectFile, O_RDONLY);
-    if (fd < 0) {
-        char mcPath[64];
+    if (readConfigPathCandidate(redirectFile, outPath, outPathLen))
+        return 1;
 
-        if (!gBootHomeDeferred || !mcConfigPathRedirect(mcPath, sizeof(mcPath)))
-            return 0;
-
-        fd = open(mcPath, O_RDONLY);
-        if (fd < 0)
-            return 0;
-    }
-
-    len = read(fd, outPath, outPathLen - 1);
-    close(fd);
-    if (len <= 0)
+    // A failed hostfs O_TRUNC/write may leave an empty bootstrap file. Do not let that hide
+    // a complete memory-card mirror saved for the host: boot.
+    if ((!gBootHomeDeferred && !oplBootDirIsHostFs()) || !mcConfigPathRedirect(mcPath, sizeof(mcPath)))
         return 0;
+    return readConfigPathCandidate(mcPath, outPath, outPathLen);
+}
 
-    while (len > 0 && (outPath[len - 1] == '\r' || outPath[len - 1] == '\n' || outPath[len - 1] == ' ' || outPath[len - 1] == '\t'))
-        len--;
-    outPath[len] = '\0';
+static int readConfigPathRedirectMirror(char *outPath, int outPathLen)
+{
+    char mcPath[64];
 
-    return len > 0;
+    return mcConfigPathRedirect(mcPath, sizeof(mcPath)) &&
+           readConfigPathCandidate(mcPath, outPath, outPathLen);
 }
 
 static int writeConfigPathRedirect(const char *path)
@@ -353,7 +370,7 @@ static int writeConfigPathRedirect(const char *path)
         primaryOk = (n1 == (int)strlen(path) && n2 == 1);
     }
 
-    if (gBootHomeDeferred) {
+    if (gBootHomeDeferred || oplBootDirIsHostFs()) {
         char mcPath[64];
         int mirrorOk = 0;
 
@@ -377,8 +394,11 @@ static int writeConfigPathRedirect(const char *path)
                 LOG("CONFIG could not mirror settings path to %s\n", mcPath);
         }
 
-        // The card mirror is the only bootstrap copy a deferred network boot can read.
-        return mirrorOk;
+        // A deferred network boot can only read the card mirror before network setup. A hostfs
+        // boot can use either the primary file or its mirror, so preserve either successful copy.
+        if (gBootHomeDeferred)
+            return mirrorOk;
+        return primaryOk || mirrorOk;
     }
 
     return primaryOk;
@@ -938,6 +958,8 @@ static int resolveApaBootHome(void);
 int tryAlternateDevice(int types)
 {
     char redirectPath[64];
+    char primaryRedirect[64];
+    char mirrorRedirect[64];
     int value;
     DIR *dir;
 
@@ -962,6 +984,7 @@ int tryAlternateDevice(int types)
     // The user's Custom Settings Path, if one was set, takes precedence over every discovery probe
     // below -- it is an explicit instruction, not a guess.
     if (readConfigPathRedirect(redirectPath, sizeof(redirectPath))) {
+        snprintf(primaryRedirect, sizeof(primaryRedirect), "%s", redirectPath);
         if (prepareCustomSettingsPath(redirectPath, sizeof(redirectPath)) >= 0) {
             LOG("CONFIG custom settings path -> %s\n", redirectPath);
             configEnd();
@@ -980,6 +1003,27 @@ int tryAlternateDevice(int types)
         } else {
             // Named a BDM device that never mounted.
             LOG("CONFIG custom settings path %s did not mount\n", redirectPath);
+        }
+
+        // A non-empty hostfs config.path can still be stale or truncated. If its target did not
+        // load, retry a distinct MC mirror rather than letting the old primary hide a saved home.
+        if (!gBootHomeDeferred && oplBootDirIsHostFs() &&
+            readConfigPathRedirectMirror(mirrorRedirect, sizeof(mirrorRedirect)) &&
+            strcmp(primaryRedirect, mirrorRedirect) != 0) {
+            if (prepareCustomSettingsPath(mirrorRedirect, sizeof(mirrorRedirect)) >= 0) {
+                LOG("CONFIG retrying settings path from memory-card mirror -> %s\n", mirrorRedirect);
+                configEnd();
+                configInit(mirrorRedirect);
+                value = configReadMulti(types);
+                if (value & CONFIG_OPL)
+                    return value;
+
+                configEnd();
+                configInit(gBootDir[0] != '\0' ? gBootDir : NULL);
+                LOG("CONFIG mirrored settings path was stale; restored normal home %s\n", gBootDir);
+            } else {
+                LOG("CONFIG mirrored settings path %s did not mount\n", mirrorRedirect);
+            }
         }
     }
 
@@ -1988,20 +2032,32 @@ void _loadConfig()
     showCfgPopup = (result & CONFIG_OPL) ? 1 : 0;
 }
 
+static int configWriteChecked(int types);
+static void configMarkRequestedSetsModified(int types)
+{
+    for (int bit = 1; bit < (1 << CONFIG_INDEX_COUNT); bit <<= 1) {
+        if (types & bit) {
+            config_set_t *cfg = configGetByType(bit);
+            if (cfg != NULL)
+                cfg->markModified();
+        }
+    }
+}
+
 static int trySaveConfigMMCE(int types)
 {
     DIR *dir = opendir("mmce0:");
     if (dir != NULL) {
         closedir(dir);
         configSetMove("mmce0:");
-        return configWriteMulti(types);
+        return configWriteChecked(types);
     }
 
     dir = opendir("mmce1:");
     if (dir != NULL) {
         closedir(dir);
         configSetMove("mmce1:");
-        return configWriteMulti(types);
+        return configWriteChecked(types);
     }
 
     return -ENOENT;
@@ -2026,7 +2082,7 @@ static int trySaveConfigBDM(int types)
 
     if (bdm_result) {
         configSetMove(path);
-        return configWriteMulti(types);
+        return configWriteChecked(types);
     }
 
     return -ENOENT;
@@ -2039,7 +2095,7 @@ static int trySaveConfigHDD(int types)
     // Check that the formatted & usable HDD is connected.
     if (hddCheck() == 0 && gHDDPrefix != NULL) {
         configSetMove(gHDDPrefix);
-        return configWriteMulti(types);
+        return configWriteChecked(types);
     }
 
     return -ENOENT;
@@ -2048,13 +2104,14 @@ static int trySaveConfigHDD(int types)
 static int trySaveConfigMC(int types)
 {
     configSetMove(NULL);
-    return configWriteMulti(types);
+    return configWriteChecked(types);
 }
 
 static int trySaveAlternateDevice(int types)
 {
     char pwd[64] = {0};
     int value;
+    int hostfsBoot = oplBootDirIsHostFs();
 
     if (gBootDir[0] != '\0')
         snprintf(pwd, sizeof(pwd), "%s", gBootDir);
@@ -2062,15 +2119,16 @@ static int trySaveAlternateDevice(int types)
         pwd[0] = '\0';
 
     // First, try the device that OPL booted from.
-    if (oplBootDirIsHostFs()) {
+    if (hostfsBoot) {
         // host: is the emulator's host filesystem. No support driver claims that prefix, so
         // oplPath2Mode() returns -1 for it and every boot-device fast path in OPL misses -- this
         // function in particular fell straight through to the all-devices sweep below, which probes
         // both MC slots, then blocks up to 1500 ms in bdmEnsureSourceModules() waiting for USB
         // modules, then scans MMCE. Under an emulator with nothing attached that is the entire cost,
         // paid to look for a home when a perfectly writable one is the directory we booted from.
-        // It IS writable, so write there and stop.
-        if ((value = configWriteMulti(types)) > 0)
+        // Try the boot directory once more; some hostfs implementations recover after the first failed open.
+        configMarkRequestedSetsModified(types);
+        if ((value = configWriteChecked(types)) > 0)
             return value;
         LOG("CONFIG host: boot dir is not writable; falling back to device discovery\n");
     } else if (!strncmp(pwd, "hdd", 3) || !strncmp(pwd, "pfs", 3)) {
@@ -2087,16 +2145,24 @@ static int trySaveAlternateDevice(int types)
     // Config was not saved to the boot device. Try all supported devices.
     // Try memory cards
     if (sysCheckMC() >= 0) {
+        if (hostfsBoot)
+            configMarkRequestedSetsModified(types);
         if ((value = trySaveConfigMC(types)) > 0)
             return value;
     }
     // Try MMCE
+    if (hostfsBoot)
+        configMarkRequestedSetsModified(types);
     if ((value = trySaveConfigMMCE(types)) > 0)
         return value;
     // Try a USB device
+    if (hostfsBoot)
+        configMarkRequestedSetsModified(types);
     if ((value = trySaveConfigBDM(types)) > 0)
         return value;
     // Try the HDD
+    if (hostfsBoot)
+        configMarkRequestedSetsModified(types);
     if ((value = trySaveConfigHDD(types)) > 0)
         return value;
 
@@ -2125,6 +2191,15 @@ static int configWriteChecked(int types)
         }
     }
     return result;
+}
+
+static int configHomeRecoverableWithoutRedirect(const char *home)
+{
+    // Host-boot recovery probes these conventional homes directly; other device types need
+    // a persistent config.path pointer because they are not enumerated on every boot.
+    return home != NULL &&
+           ((!strncmp(home, "mc", 2) && strchr(home, ':') != NULL) ||
+            !strncmp(home, "mmce0:", 6) || !strncmp(home, "mmce1:", 6));
 }
 
 static const char *configFileName(const config_set_t *config)
@@ -2452,17 +2527,23 @@ static void _saveConfig()
     }
     // <= 0, not == 0: configWriteChecked can only return 0 or a positive sum today, but the guard
     // costs nothing and a negative would otherwise read as success here.
-    // The alternate-device hunt is ONLY for the legacy no-boot-identity case: with a known boot
-    // dir, settings live there (or at the custom path) and a failed write must FAIL VISIBLY -- the
-    // save-to-CWD doctrine. Scattering them onto whichever other device answers is how settings
-    // ended up on mass0: on a memory-card boot.
-    if (gBootDir[0] == '\0') {
+    // With a known, non-host boot dir, a failed write must FAIL VISIBLY -- the save-to-CWD doctrine.
+    // host: is different: emulators vary in whether hostfs permits writes, so a failed host save may
+    // use another mounted, writable OPL device. Explicit Custom Settings Path has already returned above.
+    if (gBootDir[0] == '\0' || (lscret <= 0 && oplBootDirIsHostFs())) {
         if (lscret <= 0)
             lscret = trySaveAlternateDevice(lscstatus);
         // Record where discovery landed so the NEXT boot skips the hunt (the redirect is a
         // legacy-discovery aid; with a known boot dir the custom-path block above owns it).
-        if (lscret > 0)
-            writeConfigPathRedirect(configGetDir());
+        if (lscret > 0) {
+            const char *savedHome = configGetHomePath();
+            int redirectSaved = writeConfigPathRedirect(savedHome);
+            if (!redirectSaved && oplBootDirIsHostFs() && !configHomeRecoverableWithoutRedirect(savedHome)) {
+                LOG("CONFIG data was written to %s but no bootstrap pointer could be persisted\n", savedHome);
+                gLastSaveErrno = EIO;
+                lscret = 0;
+            }
+        }
     }
     if (lscret > 0 && hddOplHomeSelectionPending() && !commitSelectedHddOplHome())
         lscret = 0;

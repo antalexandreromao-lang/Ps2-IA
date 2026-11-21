@@ -128,6 +128,7 @@ extern void *logo0_png;
 extern void *logo1_png;
 extern void *logo2_png;
 extern void *logo3_png;
+extern void *boot_splash_png;
 extern void *case_png;
 #ifdef BUILTIN_KORIUM
 extern void *apps_case_png;
@@ -356,6 +357,7 @@ static texture_t internalDefault[TEXTURES_COUNT] = {
     {OPL_LIBRARY_BACKGROUND, "opl_library_bg", &opl_library_bg_png},
     {OPL_LIBRARY_OVERLAY, "opl_library_overlay", &opl_library_overlay_png},
     {OPL_LIBRARY_OVERLAY_PS1, "opl_library_overlay_ps1", &opl_library_overlay_ps1_png},
+    {BOOT_SPLASH_PICTURE, "boot_splash", &boot_splash_png},
 };
 
 int texLookupInternalTexId(const char *name)

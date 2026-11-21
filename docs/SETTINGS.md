@@ -92,6 +92,10 @@ MMCE Prefix Path (`mmce_prefix`).
 | HDD Cache | In-game read cache for the APA HDD. | `hdd_cache` |
 | SMB Cache | In-game read cache for SMB. | `smb_cache` |
 
+### Emulator `host:` path and error 19
+
+When the ELF was started from an emulator's `host:` filesystem, RiptOPL first tries to save beside that boot path. If hostfs rejects the write, it now searches for another available writable OPL device (memory card, MMCE, BDM storage, or HDD) and remembers the successful home. Error **19** is `ENODEV` (“no such device”): it usually means the emulator did not expose that `host:` path as a writable device. If no fallback device is attached, insert/enable a virtual memory card or set **Custom Settings Path** to an existing writable folder on a supported device. An explicitly chosen custom path remains authoritative and does not silently save elsewhere.
+
 ## Language
 
 | Row | What it does | Key |
