@@ -1,0 +1,79 @@
+#ifndef __FNTSYS_H
+#define __FNTSYS_H
+
+/// default (built-in) font id
+constexpr int FNT_DEFAULT = (0);
+/// Value returned on errors
+constexpr int FNT_ERROR = (-1);
+
+constexpr int FNTSYS_DEFAULT_SIZE = 17;
+
+// Menu font size (original #1038): applies to text using FNTSYS_DEFAULT_SIZE, translated and
+// fallback fonts included. Theme fonts with an explicit point size keep it.
+enum {
+    FONT_SIZE_SMALL = 0,
+    FONT_SIZE_DEFAULT,
+    FONT_SIZE_LARGE,
+    FONT_SIZE_COUNT
+};
+
+/** Menu fonts use 15/17/19 px. Other theme-requested point sizes stay unchanged. */
+int fntScaleFontSize(int baseSize);
+
+/** A stored size outside FONT_SIZE_* reads as Default. */
+inline int fntValidFontSize(int size)
+{
+    return (size >= FONT_SIZE_SMALL && size < FONT_SIZE_COUNT) ? size : FONT_SIZE_DEFAULT;
+}
+
+/** Initializes the font subsystem */
+void fntInit();
+
+/** Terminates the font subsystem */
+void fntEnd();
+
+/** Loads a font from a file path
+ * @param path The path to the font file
+ * @return font slot id (negative value means error happened) */
+int fntLoadFile(char *path, int fontSize);
+
+/** Loads an optional Unicode fallback font
+ * @param path The path to the font file
+ * @return 0 on success, negative value on error */
+int fntLoadFallback(char *path);
+
+/** Draws a theme font at a weight, 100 to 900 (0: the face's own): a variable face as designed, a static one grown */
+void fntSetWeight(int id, int weight);
+
+/** Reloads the default font */
+int fntLoadDefault(char *path);
+
+/** Releases a font slot */
+void fntRelease(int id);
+
+/** Updates to the native display resolution and aspect ratio
+ * @note Invalidates the whole glyph cache for all fonts! */
+void fntUpdateAspectRatio();
+
+/** Renders a text with specified window dimensions */
+int fntRenderString(int id, int x, int y, short aligned, size_t width, size_t height, const char *string, u64 colour);
+
+/** Renders a string limited to `room` units: whole if it fits, else scrolling (scroll=1) or ending in "..." (scroll=0).
+    Centred on x for ALIGN_HCENTER, like fntRenderString. Returns the end x. */
+int fntRenderStringFit(int id, int x, int y, short aligned, int room, const char *string, u64 colour, int scroll);
+
+/** replaces spaces with newlines so that the text fits into the specified width.
+ * @note A destrutive operation - modifies the given string!
+ */
+void fntFitString(int id, char *string, size_t width);
+
+/** Greedy word wrap of text to innerW (unscaled) into out, '\\n' between lines; an explicit '\\n' stays a break.
+ * A word wider than the line breaks between characters, and CJK, Thai and Lao text (no spaces) breaks only where
+ * those scripts allow. Never ends inside a character when out fills. Returns the number of lines. */
+int fntWrapText(int id, const char *text, int innerW, char *out, int outSize);
+
+/** Calculates the width of the given text string
+ * We can't use the height for alignment, as the horizontal center would depends of the contained text itself */
+int fntCalcDimensions(int id, const char *str);
+
+#endif

@@ -1,0 +1,68 @@
+name: Build PS2 ELF
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build GCC ELF
+    runs-on: ubuntu-24.04
+    env:
+      PS2BUILD_HOME: ${{ github.workspace }}/.ps2dev
+      PS2DEV_INSTALL_DIR: ${{ github.workspace }}/.ps2dev
+      PS2BUILD_SDK_NO_FALLBACK: "1"
+      # The SDK installer itself fails closed above; install_ports.py has a separate mirror fallback,
+      # so point that fallback only at the official ps2build organization as an additional guard.
+      PS2BUILD_SDK_MIRROR: ps2build/ps2build
+      PS2BUILD_TOOLCHAIN: gcc
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12.12"
+
+      - name: Install Python requirements
+        run: python3 -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Install official ps2build SDK
+        run: sh tools/ps2build_sdk.sh "$PS2BUILD_HOME"
+
+      - name: Install official GCC ports
+        run: sh tools/install_ps2build.sh
+
+      - name: Prepare required assets and translations
+        run: python3 tools/assets.py all
+
+      - name: Build packed ELF
+        run: python3 tools/build.py --toolchain gcc --out-dir build
+
+      - name: Stage development ELF and notices
+        run: |
+          test -s build/bin/riptopl-packed.elf
+          mkdir -p artifact
+          cp build/bin/riptopl-packed.elf artifact/PS2ForgeAI-OPL.ELF
+          cp LICENSE CREDITS artifact/
+          cp modules/network/smb2man/usmb2/LICENSE artifact/LICENSE-USMB2.txt
+          test "$(find artifact -maxdepth 1 -type f | wc -l)" -eq 4
+
+      - name: Upload development build and notices
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ps2-forge-ai-dev-build
+          path: |
+            artifact/PS2ForgeAI-OPL.ELF
+            artifact/LICENSE
+            artifact/CREDITS
+            artifact/LICENSE-USMB2.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
